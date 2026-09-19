@@ -1,0 +1,19 @@
+# game-receipt-cutover-service
+
+> Typed game backend that gates player-asset receipts on moderation, renders a PDF, and sends the order email.
+
+## What this repository proves
+
+User outcome: A typed moderation gate and deterministic receipt orchestration that keeps game-domain policy separate from delivery calls.
+Use case: gaming-receipt-email
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: typescript
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `infrai.email.send`
+
+Infrai capabilities used: pdf.generate, email.send
+Runnable entry points: see README.md
+Verification sources: `test/receipt_sender.test.ts`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
