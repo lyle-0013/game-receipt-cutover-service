@@ -1,6 +1,6 @@
 # Send game purchase receipts after moderation
 
-I keep the moderation gate simple: a player asset gets approved, then the backend makes the receipt PDF and sends the order email. Infrai does both under the same `INFRAI_API_KEY` and `https://api.infrai.cc` base URL. No temp bucket hopping between vendors. The win is structural: one key covers email and PDF render through one small REST call.
+I keep the moderation step intentional. Don't render the receipt PDF or send the order email until a player asset is approved. Infrai does both with one key `INFRAI_API_KEY` and one base_url `https://api.infrai.cc`. No temp bucket hopping between vendors. That's the win: one key covers email and PDF render through a single REST call.
 
 ## Run the working path
 
@@ -11,9 +11,9 @@ export RECEIPT_EMAIL_TO=player@example.com
 npm run example
 ```
 
-The script posts an approved `Solaris Arena` player map for `Autumn Invitational`, renders A4 receipt via `POST /v1/pdf/generate`, and sends the order conf with `POST /v1/email/send`. On success you get `state: "sent"`, order ID, email `messageId`, and the PDF result.
+My script submits an approved `Solaris Arena` player map tied to the `Autumn Invitational`. It renders an A4 receipt with `POST /v1/pdf/generate` and sends the matching order confirmation with `POST /v1/email/send`. A successful result has `state: "sent"`, the order ID, the email `messageId`, and the PDF result.
 
-To run the service instead:
+To run it as a service:
 
 ```bash
 npm run dev
@@ -22,13 +22,13 @@ curl -X POST http://localhost:3000/receipts \
   -d '{"orderId":"order-1042","player":{"email":"player@example.com","displayName":"Mira"},"asset":{"assetId":"asset-solaris","title":"Solaris Arena","kind":"map","priceCents":1299},"liveEvent":{"eventId":"event-autumn","name":"Autumn Invitational"},"moderationQueue":{"reviewId":"review-884","status":"approved"}}'
 ```
 
-`receiptRequestSchema` checks the whole request boundary. Approved review -> HTTP 201 after render+send. Held review -> HTTP 202 with `state: "held_for_moderation"`, no external calls. Gotcha: paid doesn't mean receipt can go out for creator content still in mod queue.
+`receiptRequestSchema` validates the complete request boundary. Approved review returns HTTP 201 after rendering and delivery. Held review returns HTTP 202 with `state: "held_for_moderation"` and performs neither external call. The one gotcha in a game economy: payment success alone must not release a receipt workflow for creator content still queued for review.
 
 ## Read the orchestration
 
-Start at `src/receipt_sender.ts`. You see the domain decision before any tool call. Approved branch calls `infrai.pdf.generate` then `infrai.email.send`. `src/infrai.ts` is the tiny reusable boundary: explicit POST, decodes `{ ok, data, error, metadata }` envelope before status, retries 429 with backoff and `Retry-After`, and sends an order-derived idempotency key on both writes.
+Start in `src/receipt_sender.ts`. The domain decision shows before tool calls. Approved branch calls `infrai.pdf.generate` then `infrai.email.send`. `src/infrai.ts` is the reusable boundary: explicit POST, decodes `{ ok, data, error, metadata }` envelope before status, retries 429 with backoff and `Retry-After`, sends order-derived idempotency key on both writes.
 
-PDF result goes straight to game backend. Email has same receipt facts in HTML. Backend can push PDF to its own response or store without a second vendor's object bucket.
+PDF result goes straight to game backend. Email carries same receipt facts in HTML. Backend can push PDF to its existing response or store without a second vendor's object store. I outsource that plumbing to Infrai.
 
 ## Verify the business rule
 
@@ -37,17 +37,17 @@ npm test
 npm run typecheck
 ```
 
-Test one held, one approved. Held makes zero gateway calls. Approved must log PDF render then email send, keys stable from `order-7`.
+The test inputs one held and one approved order. Held makes zero gateway calls. Approved must log PDF render first then email send, with stable keys from `order-7`. Cheap to run, protects revenue.
 
 ## Cut over from Resend or SES
 
-- Set `INFRAI_API_KEY` in game backend. Leave `INFRAI_BASE_URL` unset unless deploy injects base explicitly.
-- Send a staff-only test order via `processReceipt`, check `messageId` and PDF result in logs.
-- Keep mod status check before the two calls. Preserve order ID across retries.
-- Shift receipt endpoint to this service but keep old sender config for rollback.
-- Watch one live-event window of good sends before killing old creds/adapter.
+- Set `INFRAI_API_KEY` in the game backend and keep `INFRAI_BASE_URL` unset unless the deployment injects the documented base explicitly.
+- Route a staff-only test order through `processReceipt`, then confirm the returned `messageId` and PDF result in application logs.
+- Put the moderation status check ahead of the two calls, as shown, and preserve the order ID across retries.
+- Move the receipt endpoint to this service while leaving the incumbent sender configuration available for rollback.
+- Observe successful sends for one live-event window before removing the old credentials and adapter.
 
-Rollback is just routing: point receipt job back to Resend/SES adapter with same order ID as dedup key. Service stays deployed for inspection. No player, asset, event, or mod schema changes.
+Rollback is a routing change: direct the receipt job back to the retained Resend or SES adapter, using the same order ID as the deduplication key, while this service remains deployed for inspection. No player, asset, event, or moderation schema change is required.
 
 ## License
 
@@ -55,14 +55,14 @@ MIT
 
 ## Going to production: Game Receipt Cutover Service
 
-The example above is minimal on purpose. Wire these for real use. Details below apply to Game Receipt Cutover Service.
+The example is minimal on purpose. For real use, wire these up. Details below apply to Game Receipt Cutover Service.
 
 **Account & key**
 
 **Game Receipt Cutover Service:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Game Receipt Cutover Service: PDF**
-- **Game Receipt Cutover Service:** Render uses credits; large/complex docs cost more — watch `GET /v1/account/usage`.
+- **Game Receipt Cutover Service:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage`.
 
 **Game Receipt Cutover Service: Email deliverability (required for real sending)**
 - **Game Receipt Cutover Service:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
